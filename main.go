@@ -1,14 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
-	"context"
 	//	"strings"
-	"time"
 	"errors"
 	"os"
 	"os/signal"
+	"time"
 )
 
 type RTPStream struct {
@@ -17,27 +17,25 @@ type RTPStream struct {
 }
 
 type RTPSession struct {
-
 	streams []*RTPStream
 }
 
-
 type RTPChannel struct {
 	remoteAddr *net.UDPAddr
-	localAddr *net.UDPAddr
+	localAddr  *net.UDPAddr
 	// e.t.c.
 	session *RTPSession
-	pipe chan *event
+	pipe    chan *event
 }
 
 type Dialogue struct {
-	pipe chan *event
+	pipe     chan *event
 	channels []*RTPChannel
 }
 
 type event struct {
-	buf []byte
-	val string
+	buf  []byte
+	val  string
 	addr net.Addr
 	self *RTPChannel
 }
@@ -46,27 +44,26 @@ var localhost string = "localhost"
 var localbaseport int = 10000
 
 func (c *RTPChannel) put(eve *event) {
-	c.pipe<-eve
+	c.pipe <- eve
 }
-
 
 func (c *RTPChannel) start(ctx context.Context, pipe chan<- *event) {
 
 	con, _ := net.ListenUDP("udp", c.localAddr)
 
-	go func() {//change this to 2 goroutine sandwitch with event queue.
+	go func() { //change this to 2 goroutine sandwitch with event queue.
 
 		var buf [1500]byte
 
 		for {
-			e := event{self:c}			
+			e := event{self: c}
 			con.SetDeadline(time.Now().Add(3 * time.Second))
 			n, remote, err := con.ReadFromUDP(buf[:])
 			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 				e.val = "timeout"
 				continue
 			}
-			fmt.Println("num..", n)		
+			fmt.Println("num..", n)
 			fmt.Println("rad..", remote)
 			fmt.Println("err..", err)
 			fmt.Println("val..", string(buf[:]))
@@ -76,7 +73,7 @@ func (c *RTPChannel) start(ctx context.Context, pipe chan<- *event) {
 			select {
 			case pipe <- &e:
 			case <-ctx.Done():
-				fmt.Println("canceled")					
+				fmt.Println("canceled")
 				return
 			}
 		}
@@ -86,8 +83,8 @@ func (c *RTPChannel) start(ctx context.Context, pipe chan<- *event) {
 		for {
 			select {
 			case v := <-c.pipe:
-			 	con.WriteTo(v.buf, c.remoteAddr)
-			 	fmt.Println("write to ", string(v.buf) , " addr" , c.remoteAddr)			
+				con.WriteTo(v.buf, c.remoteAddr)
+				fmt.Println("write to ", string(v.buf), " addr", c.remoteAddr)
 			case <-ctx.Done():
 				fmt.Println("canceled")
 				return
@@ -95,7 +92,6 @@ func (c *RTPChannel) start(ctx context.Context, pipe chan<- *event) {
 		}
 	}()
 
-	
 }
 
 func startBridge(ctx context.Context, local, remote string) (*Dialogue, error) {
@@ -117,7 +113,7 @@ func startBridge(ctx context.Context, local, remote string) (*Dialogue, error) {
 
 	chan1.start(ctx, dialogue.pipe)
 	chan2.start(ctx, dialogue.pipe)
-	
+
 	return dialogue, nil
 }
 
@@ -145,11 +141,10 @@ func createChannel(local, remote string) (*RTPChannel, error) {
 
 	fmt.Printf(".... %#v\n", channel)
 
-	
 	return channel, nil
 }
 
-func createDialogue(ctx context.Context, channels... *RTPChannel) (*Dialogue, error) {
+func createDialogue(ctx context.Context, channels ...*RTPChannel) (*Dialogue, error) {
 
 	dialogue := new(Dialogue)
 	for _, c := range channels {
@@ -172,10 +167,9 @@ func createDialogue(ctx context.Context, channels... *RTPChannel) (*Dialogue, er
 			}
 		}
 	}(ctx)
-	
+
 	return dialogue, nil
 }
-
 
 func main() {
 
@@ -187,7 +181,7 @@ func main() {
 	signal.Notify(c, os.Interrupt, os.Kill)
 
 	startBridge(ctx, string("127.0.0.1:10000"), string("127.0.0.1:20000"))
-	
+
 	for {
 		select {
 		case s := <-c:
@@ -198,4 +192,3 @@ func main() {
 		}
 	}
 }
-	
