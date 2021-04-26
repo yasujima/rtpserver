@@ -2,17 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
-	//	"strings"
-	"errors"
 	"os"
 	"os/signal"
 	"time"
 )
 
 type RTPStream struct {
-	queue []*event
+	queue *Queue
 	// ssrc etc
 }
 
@@ -20,12 +19,15 @@ type RTPSession struct {
 	streams []*RTPStream
 }
 
+func (session *RTPSession) getStreamQ() *Queue {
+	return session.streams[0].queue
+}
+
 type RTPChannel struct {
 	remoteAddr *net.UDPAddr
 	localAddr  *net.UDPAddr
-	// e.t.c.
-	session *RTPSession
-	pipe    chan *event
+	session    *RTPSession
+	pipe       chan *event
 }
 
 type Dialogue struct {
@@ -51,29 +53,40 @@ func (c *RTPChannel) start(ctx context.Context, pipe chan<- *event) {
 
 	con, _ := net.ListenUDP("udp", c.localAddr)
 
-	go func() { //change this to 2 goroutine sandwitch with event queue.
+	go func() {
 
 		var buf [1500]byte
-
 		for {
-			e := event{self: c}
+
 			con.SetDeadline(time.Now().Add(3 * time.Second))
 			n, remote, err := con.ReadFromUDP(buf[:])
 			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
-				e.val = "timeout"
 				continue
 			}
 			fmt.Println("num..", n)
 			fmt.Println("rad..", remote)
 			fmt.Println("err..", err)
 			fmt.Println("val..", string(buf[:]))
+			e := event{self: c}
 			e.buf = make([]byte, n)
 			copy(e.buf, buf[:])
 			e.addr = remote
 			select {
-			case pipe <- &e:
+			case c.session.getStreamQ().In() <- &e:
 			case <-ctx.Done():
-				fmt.Println("canceled")
+				fmt.Println("canceled receiver")
+				return
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			select {
+			case v := <-c.session.getStreamQ().Out():
+				pipe <- v.(*event)
+			case <-ctx.Done():
+				fmt.Println("canceled putter")
 				return
 			}
 		}
@@ -86,7 +99,7 @@ func (c *RTPChannel) start(ctx context.Context, pipe chan<- *event) {
 				con.WriteTo(v.buf, c.remoteAddr)
 				fmt.Println("write to ", string(v.buf), " addr", c.remoteAddr)
 			case <-ctx.Done():
-				fmt.Println("canceled")
+				fmt.Println("canceled writer")
 				return
 			}
 		}
@@ -132,7 +145,7 @@ func createChannel(local, remote string) (*RTPChannel, error) {
 	channel.remoteAddr = raddr
 
 	stream := new(RTPStream)
-	stream.queue = make([]*event, 0)
+	stream.queue = newQueue()
 	session := new(RTPSession)
 	session.streams = append(session.streams, stream)
 	channel.session = session
@@ -163,6 +176,7 @@ func createDialogue(ctx context.Context, channels ...*RTPChannel) (*Dialogue, er
 					}
 				}
 			case <-ctx.Done():
+				fmt.Println("dialogue routine cannceled")
 				return
 			}
 		}
@@ -177,14 +191,14 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, os.Kill)
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, os.Interrupt, os.Kill)
 
-	startBridge(ctx, string("127.0.0.1:10000"), string("127.0.0.1:20000"))
+	startBridge(ctx, string(localhost+":10000"), string(localhost+":20000"))
 
 	for {
 		select {
-		case s := <-c:
+		case s := <-sigc:
 			fmt.Println("signal received", s)
 			return
 		case <-time.After(1 * time.Second):
