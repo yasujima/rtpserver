@@ -27,7 +27,7 @@ import (
 */
 
 type RTPHeader struct {
-	Ver    [2]bit.Bit //2bit
+	Ver  [2]bit.Bit //2bit
 	Pad  bit.Bit    //1bit
 	Ext  bit.Bit    //1bit
 	CC   [4]bit.Bit // 4bit
@@ -43,9 +43,9 @@ func createHeader(pt byte, seq uint16, ts, ssrc uint32) []byte {
 
 	//bigendian composition
 
-	header := make([]byte, 4*3)                  // 
-	header[0] |= 0x80                            // version 2              v_p_x_cc
-	header[1] |= pt &0x7f
+	header := make([]byte, 4*3) //
+	header[0] |= 0x80           // version 2              v_p_x_cc
+	header[1] |= pt & 0x7f
 	binary.BigEndian.PutUint16(header[2:], seq)  //?? big or little
 	binary.BigEndian.PutUint32(header[4:], ts)   //?? big or little
 	binary.BigEndian.PutUint32(header[8:], ssrc) //?? big or little
@@ -165,28 +165,27 @@ func main() {
 
 	fmt.Printf("%x, %x\n", t, ssrc)
 	b := createHeader(18, 0x1, t, ssrc)
-	fmt.Printf("%s", hex.Dump(b))	
+	fmt.Printf("%s", hex.Dump(b))
 	br := bytes.NewReader(b)
 
 	/*
-	var i uint32
-	if err := binary.Read(br, binary.BigEndian, &i); err != nil {
-			fmt.Println("2 binary.Read failed:", err)
-	}
-	fmt.Printf("%x\n", i)
+		var i uint32
+		if err := binary.Read(br, binary.BigEndian, &i); err != nil {
+				fmt.Println("2 binary.Read failed:", err)
+		}
+		fmt.Printf("%x\n", i)
 	*/
-	
+
 	h := RTPHeader{}
-	fmt.Printf("v=%#v\n",h)
-	fmt.Printf("ver = %v\n", h.getVersion())	
+	fmt.Printf("v=%#v\n", h)
+	fmt.Printf("ver = %v\n", h.getVersion())
 	if err := bit.Read(br, binary.BigEndian, &h); err != nil {
 		fmt.Printf("error:%s", err)
 		return
 	}
-	fmt.Printf("v=%#v\n",h)
+	fmt.Printf("v=%#v\n", h)
 
 	fmt.Printf("ver = %v\n", h.getVersion())
-	fmt.Printf("pt = %v\n", h.getPt())	
-
+	fmt.Printf("pt = %v\n", h.getPt())
 
 }

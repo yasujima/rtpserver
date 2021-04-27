@@ -21,7 +21,6 @@ type RTPSession struct {
 	remoteAddr *net.UDPAddr
 	localAddr  *net.UDPAddr
 	pipe       chan *event
-	
 }
 
 func (session *RTPSession) getStreamQ() *Queue {
@@ -34,10 +33,10 @@ type Dialogue struct {
 }
 
 type event struct {
-	buf  []byte
-	val  string
+	buf    []byte
+	val    string
 	source net.Addr
-	self *RTPSession
+	self   *RTPSession
 }
 
 var localhost string = "localhost"
