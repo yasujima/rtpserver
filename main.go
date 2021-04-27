@@ -36,7 +36,7 @@ type Dialogue struct {
 type event struct {
 	buf  []byte
 	val  string
-	addr net.Addr
+	source net.Addr
 	self *RTPSession
 }
 
@@ -62,13 +62,13 @@ func (c *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 				continue
 			}
 			fmt.Println("num..", n)
-			fmt.Println("rad..", remote)
+			fmt.Println("remt.", remote)
 			fmt.Println("err..", err)
 			fmt.Println("val..", string(buf[:]))
 			e := event{self: c}
 			e.buf = make([]byte, n)
 			copy(e.buf, buf[:])
-			e.addr = remote
+			e.source = remote
 			select {
 			case c.getStreamQ().In() <- &e:
 			case <-ctx.Done():
