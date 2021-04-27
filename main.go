@@ -17,39 +17,37 @@ type RTPStream struct {
 
 type RTPSession struct {
 	streams []*RTPStream
+
+	remoteAddr *net.UDPAddr
+	localAddr  *net.UDPAddr
+	pipe       chan *event
+	
 }
 
 func (session *RTPSession) getStreamQ() *Queue {
 	return session.streams[0].queue
 }
 
-type RTPChannel struct {
-	remoteAddr *net.UDPAddr
-	localAddr  *net.UDPAddr
-	session    *RTPSession
-	pipe       chan *event
-}
-
 type Dialogue struct {
 	pipe     chan *event
-	channels []*RTPChannel
+	sessions []*RTPSession
 }
 
 type event struct {
 	buf  []byte
 	val  string
 	addr net.Addr
-	self *RTPChannel
+	self *RTPSession
 }
 
 var localhost string = "localhost"
 var localbaseport int = 10000
 
-func (c *RTPChannel) put(eve *event) {
+func (c *RTPSession) put(eve *event) {
 	c.pipe <- eve
 }
 
-func (c *RTPChannel) start(ctx context.Context, pipe chan<- *event) {
+func (c *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 
 	con, _ := net.ListenUDP("udp", c.localAddr)
 
@@ -72,7 +70,7 @@ func (c *RTPChannel) start(ctx context.Context, pipe chan<- *event) {
 			copy(e.buf, buf[:])
 			e.addr = remote
 			select {
-			case c.session.getStreamQ().In() <- &e:
+			case c.getStreamQ().In() <- &e:
 			case <-ctx.Done():
 				fmt.Println("canceled receiver")
 				return
@@ -83,7 +81,7 @@ func (c *RTPChannel) start(ctx context.Context, pipe chan<- *event) {
 	go func() {
 		for {
 			select {
-			case v := <-c.session.getStreamQ().Out():
+			case v := <-c.getStreamQ().Out():
 				pipe <- v.(*event)
 			case <-ctx.Done():
 				fmt.Println("canceled putter")
@@ -109,28 +107,28 @@ func (c *RTPChannel) start(ctx context.Context, pipe chan<- *event) {
 
 func startBridge(ctx context.Context, local, remote string) (*Dialogue, error) {
 
-	chan1, err := createChannel(local, remote)
+	session1, err := createSession(local, remote)
 	if err != nil {
 		return nil, errors.New("")
 	}
 
-	chan2, err := createChannel(remote, local)
+	session2, err := createSession(remote, local)
 	if err != nil {
 		return nil, errors.New("")
 	}
 
-	dialogue, err := createDialogue(ctx, chan1, chan2)
+	dialogue, err := createDialogue(ctx, session1, session2)
 	if err != nil {
 		return nil, errors.New("")
 	}
 
-	chan1.start(ctx, dialogue.pipe)
-	chan2.start(ctx, dialogue.pipe)
+	session1.start(ctx, dialogue.pipe)
+	session2.start(ctx, dialogue.pipe)
 
 	return dialogue, nil
 }
 
-func createChannel(local, remote string) (*RTPChannel, error) {
+func createSession(local, remote string) (*RTPSession, error) {
 
 	laddr, err := net.ResolveUDPAddr("udp", local)
 	if err != nil {
@@ -140,28 +138,26 @@ func createChannel(local, remote string) (*RTPChannel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("remote addr invalid", remote)
 	}
-	channel := new(RTPChannel)
-	channel.localAddr = laddr
-	channel.remoteAddr = raddr
+	session := new(RTPSession)
+	session.localAddr = laddr
+	session.remoteAddr = raddr
 
 	stream := new(RTPStream)
 	stream.queue = newQueue()
-	session := new(RTPSession)
 	session.streams = append(session.streams, stream)
-	channel.session = session
 
-	channel.pipe = make(chan *event)
+	session.pipe = make(chan *event)
 
-	fmt.Printf(".... %#v\n", channel)
+	fmt.Printf(".... %#v\n", session)
 
-	return channel, nil
+	return session, nil
 }
 
-func createDialogue(ctx context.Context, channels ...*RTPChannel) (*Dialogue, error) {
+func createDialogue(ctx context.Context, sessions ...*RTPSession) (*Dialogue, error) {
 
 	dialogue := new(Dialogue)
-	for _, c := range channels {
-		dialogue.channels = append(dialogue.channels, c)
+	for _, s := range sessions {
+		dialogue.sessions = append(dialogue.sessions, s)
 	}
 	pipe := make(chan *event)
 	dialogue.pipe = pipe
@@ -170,9 +166,9 @@ func createDialogue(ctx context.Context, channels ...*RTPChannel) (*Dialogue, er
 		for {
 			select {
 			case v := <-pipe:
-				for _, c := range dialogue.channels {
-					if v.self != c {
-						c.put(v)
+				for _, s := range dialogue.sessions {
+					if v.self != s {
+						s.put(v)
 					}
 				}
 			case <-ctx.Done():
