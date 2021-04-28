@@ -33,25 +33,26 @@ type RTPHeader struct {
 	CC   [4]bit.Bit // 4bit
 	Mark bit.Bit    //1bit
 	Pt   [7]bit.Bit //7bit
-	Seq  uint16
-	TS   uint32
-	Ssrc uint32
+	Seq  [2]byte
+	TS   [4]byte
+	Ssrc [4]byte
 	//	CSRC []uint32
 }
 
-func createHeader(pt byte, seq uint16, ts, ssrc uint32) []byte {
+func createHeader(pt byte, seq uint16, ts, ssrc uint32) ([]byte) {
 
 	//bigendian composition
 
 	header := make([]byte, 4*3) //
 	header[0] |= 0x80           // version 2              v_p_x_cc
-	header[1] |= pt & 0x7f
+	header[1] |= pt &^ 0x80
 	binary.BigEndian.PutUint16(header[2:], seq)  //?? big or little
 	binary.BigEndian.PutUint32(header[4:], ts)   //?? big or little
 	binary.BigEndian.PutUint32(header[8:], ssrc) //?? big or little
 	//csrc if needed.
 	return header
 }
+
 
 func (h *RTPHeader) getVersion() byte {
 	var ret byte
@@ -95,7 +96,19 @@ func (h *RTPHeader) getPt() byte {
 	return ret
 }
 
-func main() {
+func (h *RTPHeader) getSeq() uint16 {
+	return binary.LittleEndian.Uint16(h.Seq[:])
+}
+
+func (h *RTPHeader) getTimeStamp() uint32 {
+	return binary.LittleEndian.Uint32(h.TS[:])
+}
+
+func (h *RTPHeader) getSsrc() uint32 {
+	return binary.LittleEndian.Uint32(h.Ssrc[:])
+}
+
+func header_main() {
 
 	if false {
 		var i uint32
@@ -163,7 +176,7 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 	var ssrc = rand.Uint32()
 
-	fmt.Printf("%x, %x\n", t, ssrc)
+	fmt.Printf("%v, %v\n", t, ssrc)
 	b := createHeader(18, 0x1, t, ssrc)
 	fmt.Printf("%s", hex.Dump(b))
 	br := bytes.NewReader(b)
@@ -187,5 +200,8 @@ func main() {
 
 	fmt.Printf("ver = %v\n", h.getVersion())
 	fmt.Printf("pt = %v\n", h.getPt())
+	fmt.Printf("seq = %v\n", h.getSeq())
+	fmt.Printf("ts = %v\n", h.getTimeStamp())
+	fmt.Printf("ssrc = %v\n", h.getSsrc())			
 
 }

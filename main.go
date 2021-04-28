@@ -1,42 +1,75 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/nokute78/go-bit/pkg/bit/v2"
 	"net"
 	"os"
 	"os/signal"
 	"time"
 )
 
-type RTPStream struct {
-	queue *Queue
-	// ssrc etc
-}
-
-type RTPSession struct {
-	streams []*RTPStream
-
-	remoteAddr *net.UDPAddr
-	localAddr  *net.UDPAddr
-	pipe       chan *event
-}
-
-func (session *RTPSession) getStreamQ() *Queue {
-	return session.streams[0].queue
-}
-
-type Dialogue struct {
-	pipe     chan *event
-	sessions []*RTPSession
-}
-
 type event struct {
 	buf    []byte
 	val    string
 	source net.Addr
 	self   *RTPSession
+}
+
+type RTPStream struct {
+	Ssrc uint32
+	Ts   uint32
+	Seq  uint16
+}
+
+type RTPSession struct {
+	streams map[uint32]*RTPStream
+
+	recvqueue *Queue
+
+	remoteAddr *net.UDPAddr
+	localAddr  *net.UDPAddr
+
+	pipe chan *event
+}
+
+func (session *RTPSession) getRecvQ() *Queue {
+	return session.recvqueue
+}
+
+func (session *RTPSession) createSendingData(eve *event) ([]byte, error) {
+
+	header := RTPHeader{}
+	br := bytes.NewReader(eve.buf)
+	fmt.Println("reader len=", br.Len())
+	if err := bit.Read(br, binary.BigEndian, &header); err != nil {
+		return []byte{}, errors.New("binary read fail")
+	}
+	var ssrc uint32 = 0
+
+	var seq uint16 = session.streams[0].Seq
+	session.streams[0].Seq += 1
+	var ts uint32 = session.streams[0].Ts
+	session.streams[0].Ts += uint32(br.Len())
+
+	h := createHeader(0, seq, ts, ssrc)
+	var chunk [1500]byte
+	s, err := br.Read(chunk[:])
+	if err != nil {
+		fmt.Println("br read fail!!!", err)
+	}
+	ret := append(h, chunk[:s]...)
+	return ret, nil
+
+}
+
+type Dialogue struct {
+	pipe     chan *event
+	sessions []*RTPSession
 }
 
 var localhost string = "localhost"
@@ -46,11 +79,11 @@ func (c *RTPSession) put(eve *event) {
 	c.pipe <- eve
 }
 
-func (c *RTPSession) start(ctx context.Context, pipe chan<- *event) {
+func (session *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 
-	con, _ := net.ListenUDP("udp", c.localAddr)
+	con, _ := net.ListenUDP("udp", session.localAddr)
 
-	go func() {
+	go func() { //receiver work
 
 		var buf [1500]byte
 		for {
@@ -64,12 +97,12 @@ func (c *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 			fmt.Println("remt.", remote)
 			fmt.Println("err..", err)
 			fmt.Println("val..", string(buf[:]))
-			e := event{self: c}
+			e := event{self: session}
 			e.buf = make([]byte, n)
 			copy(e.buf, buf[:])
 			e.source = remote
 			select {
-			case c.getStreamQ().In() <- &e:
+			case session.getRecvQ().In() <- &e:
 			case <-ctx.Done():
 				fmt.Println("canceled receiver")
 				return
@@ -77,10 +110,10 @@ func (c *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 		}
 	}()
 
-	go func() {
+	go func() { // get and bridge work
 		for {
 			select {
-			case v := <-c.getStreamQ().Out():
+			case v := <-session.getRecvQ().Out():
 				pipe <- v.(*event)
 			case <-ctx.Done():
 				fmt.Println("canceled putter")
@@ -89,12 +122,13 @@ func (c *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 		}
 	}()
 
-	go func() {
+	go func() { // sender work
 		for {
 			select {
-			case v := <-c.pipe:
-				con.WriteTo(v.buf, c.remoteAddr)
-				fmt.Println("write to ", string(v.buf), " addr", c.remoteAddr)
+			case v := <-session.pipe:
+				data, _ := session.createSendingData(v)
+				con.WriteTo(data, session.remoteAddr)
+				fmt.Printf("write to %v", data, " addr", session.remoteAddr)
 			case <-ctx.Done():
 				fmt.Println("canceled writer")
 				return
@@ -104,14 +138,33 @@ func (c *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 
 }
 
-func startBridge(ctx context.Context, local, remote string) (*Dialogue, error) {
+func startEchoSession(ctx context.Context, local1, remote1 string) (*Dialogue, error) {
 
-	session1, err := createSession(local, remote)
+	session1, err := createSession(local1, remote1)
 	if err != nil {
 		return nil, errors.New("")
 	}
 
-	session2, err := createSession(remote, local)
+	ctx = context.WithValue(ctx, "echo", true)
+
+	dialogue, err := createDialogue(ctx, session1)
+	if err != nil {
+		return nil, errors.New("")
+	}
+
+	session1.start(ctx, dialogue.pipe)
+
+ 	return dialogue, nil	
+}
+
+func startBridge(ctx context.Context, local1, remote1, local2, remote2 string) (*Dialogue, error) {
+
+	session1, err := createSession(local1, remote1)
+	if err != nil {
+		return nil, errors.New("")
+	}
+
+	session2, err := createSession(local2, remote2)
 	if err != nil {
 		return nil, errors.New("")
 	}
@@ -124,7 +177,7 @@ func startBridge(ctx context.Context, local, remote string) (*Dialogue, error) {
 	session1.start(ctx, dialogue.pipe)
 	session2.start(ctx, dialogue.pipe)
 
-	return dialogue, nil
+ 	return dialogue, nil
 }
 
 func createSession(local, remote string) (*RTPSession, error) {
@@ -140,10 +193,11 @@ func createSession(local, remote string) (*RTPSession, error) {
 	session := new(RTPSession)
 	session.localAddr = laddr
 	session.remoteAddr = raddr
+	session.recvqueue = newQueue()
 
+	session.streams = make(map[uint32]*RTPStream)
 	stream := new(RTPStream)
-	stream.queue = newQueue()
-	session.streams = append(session.streams, stream)
+	session.streams[0] = stream // まずはSSRC０のみ使う
 
 	session.pipe = make(chan *event)
 
@@ -155,18 +209,22 @@ func createSession(local, remote string) (*RTPSession, error) {
 func createDialogue(ctx context.Context, sessions ...*RTPSession) (*Dialogue, error) {
 
 	dialogue := new(Dialogue)
+
 	for _, s := range sessions {
 		dialogue.sessions = append(dialogue.sessions, s)
 	}
+
 	pipe := make(chan *event)
 	dialogue.pipe = pipe
+
+	echo := ctx.Value("echo")
 
 	go func(ctx context.Context) { //dialogue goroutine
 		for {
 			select {
 			case v := <-pipe:
 				for _, s := range dialogue.sessions {
-					if v.self != s {
+					if echo == true || v.self != s {
 						s.put(v)
 					}
 				}
@@ -189,7 +247,9 @@ func main() {
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, os.Interrupt, os.Kill)
 
-	startBridge(ctx, string(localhost+":10000"), string(localhost+":20000"))
+	startBridge(ctx, string(localhost+":10000"), string(localhost+":20000"), string(localhost+":10002"), string(localhost+":20002"))
+
+	startEchoSession(ctx, string(localhost+":10004"), string(localhost+":20004"))
 
 	for {
 		select {

@@ -1,0 +1,31 @@
+nc -u -p 20000 localhost 10000
+nc -u -p 20002 localhost 10002
+nc -u -p 20004 localhost 10004
+
+RTPStream : RTP stream resource / ssrc,
+
+RTPSession / bunch of streams
+seq etc
+
+
+
+conn
+
+dialogue
+
+
+
+<dialogue>
+[<session>]
+
+<session> - conn
+
+RTPStream
+
+
+制御受信用スレッドGRPCのServerとして実装、念の為RESTAPIも作っておく
+
+ChannelとDialogueは管理モジュールを作成する。
+これはスレッドをもたない。
+
+中間に、routerモジュールを作成、スレッドとして起動し、すべてのイベントを割り振る。
