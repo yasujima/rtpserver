@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/nokute78/go-bit/pkg/bit/v2"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -45,7 +46,7 @@ func (session *RTPSession) createSendingData(eve *event) ([]byte, error) {
 
 	header := RTPHeader{}
 	br := bytes.NewReader(eve.buf)
-	fmt.Println("reader len=", br.Len())
+	log.Println("reader len=", br.Len())
 	if err := bit.Read(br, binary.BigEndian, &header); err != nil {
 		return []byte{}, errors.New("binary read fail")
 	}
@@ -60,7 +61,7 @@ func (session *RTPSession) createSendingData(eve *event) ([]byte, error) {
 	var chunk [1500]byte
 	s, err := br.Read(chunk[:])
 	if err != nil {
-		fmt.Println("br read fail!!!", err)
+		log.Println("br read fail!!!", err)
 	}
 	ret := append(h, chunk[:s]...)
 	return ret, nil
@@ -75,8 +76,8 @@ type Dialogue struct {
 var localhost string = "localhost"
 var localbaseport int = 10000
 
-func (c *RTPSession) put(eve *event) {
-	c.pipe <- eve
+func (session *RTPSession) put(eve *event) {
+	session.pipe <- eve
 }
 
 func (session *RTPSession) start(ctx context.Context, pipe chan<- *event) {
@@ -93,10 +94,9 @@ func (session *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 				continue
 			}
-			fmt.Println("num..", n)
-			fmt.Println("remt.", remote)
-			fmt.Println("err..", err)
-			fmt.Println("val..", string(buf[:]))
+			log.Println("num..", n)
+			log.Println("remt.", remote)
+			log.Println("val..", string(buf[:]))
 			e := event{self: session}
 			e.buf = make([]byte, n)
 			copy(e.buf, buf[:])
@@ -104,7 +104,7 @@ func (session *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 			select {
 			case session.getRecvQ().In() <- &e:
 			case <-ctx.Done():
-				fmt.Println("canceled receiver")
+				log.Println("canceled receiver")
 				return
 			}
 		}
@@ -116,7 +116,7 @@ func (session *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 			case v := <-session.getRecvQ().Out():
 				pipe <- v.(*event)
 			case <-ctx.Done():
-				fmt.Println("canceled putter")
+				log.Println("canceled putter")
 				return
 			}
 		}
@@ -128,9 +128,10 @@ func (session *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 			case v := <-session.pipe:
 				data, _ := session.createSendingData(v)
 				con.WriteTo(data, session.remoteAddr)
-				fmt.Printf("write to %v", data, " addr", session.remoteAddr)
+				log.Printf("write to %v", data, " addr", session.remoteAddr)
 			case <-ctx.Done():
-				fmt.Println("canceled writer")
+				log.Println("canceled writer")
+				con.Close()
 				return
 			}
 		}
@@ -140,7 +141,7 @@ func (session *RTPSession) start(ctx context.Context, pipe chan<- *event) {
 
 func startEchoSession(ctx context.Context, local1, remote1 string) (*Dialogue, error) {
 
-	session1, err := createSession(local1, remote1)
+	session1, err := createSession(ctx, local1, remote1)
 	if err != nil {
 		return nil, errors.New("")
 	}
@@ -154,17 +155,17 @@ func startEchoSession(ctx context.Context, local1, remote1 string) (*Dialogue, e
 
 	session1.start(ctx, dialogue.pipe)
 
- 	return dialogue, nil	
+	return dialogue, nil
 }
 
 func startBridge(ctx context.Context, local1, remote1, local2, remote2 string) (*Dialogue, error) {
 
-	session1, err := createSession(local1, remote1)
+	session1, err := createSession(ctx, local1, remote1)
 	if err != nil {
 		return nil, errors.New("")
 	}
 
-	session2, err := createSession(local2, remote2)
+	session2, err := createSession(ctx, local2, remote2)
 	if err != nil {
 		return nil, errors.New("")
 	}
@@ -177,10 +178,10 @@ func startBridge(ctx context.Context, local1, remote1, local2, remote2 string) (
 	session1.start(ctx, dialogue.pipe)
 	session2.start(ctx, dialogue.pipe)
 
- 	return dialogue, nil
+	return dialogue, nil
 }
 
-func createSession(local, remote string) (*RTPSession, error) {
+func createSession(ctx context.Context, local, remote string) (*RTPSession, error) {
 
 	laddr, err := net.ResolveUDPAddr("udp", local)
 	if err != nil {
@@ -193,7 +194,7 @@ func createSession(local, remote string) (*RTPSession, error) {
 	session := new(RTPSession)
 	session.localAddr = laddr
 	session.remoteAddr = raddr
-	session.recvqueue = newQueue()
+	session.recvqueue = newQueue(ctx)
 
 	session.streams = make(map[uint32]*RTPStream)
 	stream := new(RTPStream)
@@ -201,7 +202,7 @@ func createSession(local, remote string) (*RTPSession, error) {
 
 	session.pipe = make(chan *event)
 
-	fmt.Printf(".... %#v\n", session)
+	log.Printf(".... %#v\n", session)
 
 	return session, nil
 }
@@ -229,7 +230,7 @@ func createDialogue(ctx context.Context, sessions ...*RTPSession) (*Dialogue, er
 					}
 				}
 			case <-ctx.Done():
-				fmt.Println("dialogue routine cannceled")
+				log.Println("dialogue routine cannceled")
 				return
 			}
 		}
@@ -254,10 +255,12 @@ func main() {
 	for {
 		select {
 		case s := <-sigc:
-			fmt.Println("signal received", s)
+			log.Println("signal received", s)
+			cancel()
+			time.Sleep(1*time.Second)
 			return
 		case <-time.After(1 * time.Second):
-			fmt.Println("timeout 1")
+			log.Println("timeout 1")
 		}
 	}
 }

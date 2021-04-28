@@ -39,7 +39,7 @@ type RTPHeader struct {
 	//	CSRC []uint32
 }
 
-func createHeader(pt byte, seq uint16, ts, ssrc uint32) ([]byte) {
+func createHeader(pt byte, seq uint16, ts, ssrc uint32) []byte {
 
 	//bigendian composition
 
@@ -52,7 +52,6 @@ func createHeader(pt byte, seq uint16, ts, ssrc uint32) ([]byte) {
 	//csrc if needed.
 	return header
 }
-
 
 func (h *RTPHeader) getVersion() byte {
 	var ret byte
@@ -202,6 +201,6 @@ func header_main() {
 	fmt.Printf("pt = %v\n", h.getPt())
 	fmt.Printf("seq = %v\n", h.getSeq())
 	fmt.Printf("ts = %v\n", h.getTimeStamp())
-	fmt.Printf("ssrc = %v\n", h.getSsrc())			
+	fmt.Printf("ssrc = %v\n", h.getSsrc())
 
 }

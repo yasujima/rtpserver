@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"context"
+	"log"
 )
 
 type Queue struct {
@@ -11,9 +13,10 @@ type Queue struct {
 	accept chan interface{}
 	notify chan interface{}
 	cond   sync.Cond
+	ctx context.Context
 }
 
-func newQueue() *Queue {
+func newQueue(ctx context.Context) *Queue {
 
 	queue := new(Queue)
 	queue.que = make([]interface{}, 0)
@@ -21,6 +24,7 @@ func newQueue() *Queue {
 
 	queue.accept = make(chan interface{})
 	queue.notify = make(chan interface{})
+	queue.ctx = ctx
 	queue.run()
 	return queue
 }
@@ -32,13 +36,26 @@ func (q *Queue) run() {
 			select {
 			case val := <-q.accept:
 				q.put(val)
+			case <-q.ctx.Done():
+				q.put(nil)
+				log.Print("queue put thread end")
+				return
 			}
 		}
+
 	}()
 	go func() {
 		for {
 			v := q.get()
-			q.notify <- v
+			if v != nil {
+				q.notify <- v
+			}
+			select {
+			case <-q.ctx.Done():
+				log.Print("queue get thread end")
+				close(q.notify)
+				return
+			}
 		}
 	}()
 }
@@ -73,7 +90,7 @@ func (q *Queue) get() interface{} {
 
 func _main() {
 
-	queue := newQueue()
+	queue := newQueue(context.Background())
 
 	var wg sync.WaitGroup
 	wg.Add(2)
