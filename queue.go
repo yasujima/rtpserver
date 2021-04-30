@@ -61,11 +61,11 @@ func (q *Queue) run() {
 	}()
 }
 
-func (q *Queue) In() chan<- interface{} {
+func (q *Queue) Put() chan<- interface{} {
 	return q.accept
 }
 
-func (q *Queue) Out() <-chan interface{} {
+func (q *Queue) Get() <-chan interface{} {
 	return q.notify
 }
 
@@ -99,8 +99,8 @@ func _main() {
 	go func() {
 		for i := 0; i < 100; i++ {
 			time.Sleep(1 * time.Second)
-			queue.In() <- i
-			fmt.Println("...In ", i)
+			queue.Put() <- i
+			fmt.Println("...Put ", i)
 		}
 		wg.Done()
 	}()
@@ -108,8 +108,8 @@ func _main() {
 	go func() {
 		for {
 			select {
-			case v := <-queue.Out():
-				fmt.Println("...Out", v)
+			case v := <-queue.Get():
+				fmt.Println("...Get", v)
 			}
 			time.Sleep(2 * time.Second)
 		}

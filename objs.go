@@ -92,7 +92,7 @@ func (session *RTPSession) start(ctx context.Context, dialoguepipe <-chan *event
 				copy(e.buf, buf[:])
 				e.source = remote
 				select {
-				case queue.In() <- &e:
+				case queue.Put() <- &e:
 				case <-ctx.Done():
 					log.Println("canceled receiver")
 					return
@@ -108,7 +108,7 @@ func (session *RTPSession) start(ctx context.Context, dialoguepipe <-chan *event
 			defer close(pipe)
 			for {
 				select {
-				case v := <-queue.Out():
+				case v := <-queue.Get():
 					pipe <- v.(*event)
 				case <-ctx.Done():
 					log.Println("canceled putter")
