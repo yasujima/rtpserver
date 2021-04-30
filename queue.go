@@ -35,27 +35,28 @@ func (q *Queue) run() {
 	go func() {
 		for {
 			select {
-			case val := <-q.accept:
+			case val := <- q.accept:
 				q.put(val)
-			case <-q.ctx.Done():
+			case <- q.ctx.Done():
 				q.put(nil)
-				log.Print("queue put thread end")
+				log.Print("queue put canceled")				
 				return
 			}
 		}
 
 	}()
 	go func() {
+		defer close(q.notify)
 		for {
 			v := q.get()
 			if v != nil {
 				q.notify <- v
 			}
 			select {
-			case <-q.ctx.Done():
-				log.Print("queue get thread end")
-				close(q.notify)
+			case <- q.ctx.Done():
+				log.Print("queue get canceled")
 				return
+			default:
 			}
 		}
 	}()
@@ -108,7 +109,7 @@ func _main() {
 	go func() {
 		for {
 			select {
-			case v := <-queue.Get():
+			case v := <- queue.Get():
 				fmt.Println("...Get", v)
 			}
 			time.Sleep(2 * time.Second)

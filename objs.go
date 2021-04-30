@@ -35,7 +35,6 @@ type Dialogue struct {
 	sessions []*RTPSession
 }
 
-
 //////////////////////////////////////////////////
 // RTPSession
 //////////////////////////////////////////////////
@@ -47,9 +46,8 @@ func (session *RTPSession) createSendingData(eve *event) ([]byte, error) {
 
 	header := RTPHeader{}
 	br := bytes.NewReader(eve.buf)
-	log.Println("reader len=", br.Len())
 	if err := bit.Read(br, binary.BigEndian, &header); err != nil {
-		return []byte{}, errors.New("binary read fail")
+		return nil, errors.New("header read fail")
 	}
 
 	var ssrc uint32 = 0
@@ -62,7 +60,7 @@ func (session *RTPSession) createSendingData(eve *event) ([]byte, error) {
 	var chunk [1500]byte
 	s, err := br.Read(chunk[:])
 	if err != nil {
-		log.Println("br read fail!!!", err)
+		return nil, errors.New("chunk read fail")
 	}
 	ret := append(h, chunk[:s]...)
 	return ret, nil
@@ -84,17 +82,14 @@ func (session *RTPSession) start(ctx context.Context, dialoguepipe <-chan *event
 				if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 					continue
 				}
-				log.Println("num..", n)
-				log.Println("remt.", remote)
-				log.Println("val..", string(buf[:]))
 				e := event{self: session}
 				e.buf = make([]byte, n)
 				copy(e.buf, buf[:])
 				e.source = remote
 				select {
 				case queue.Put() <- &e:
-				case <-ctx.Done():
-					log.Println("canceled receiver")
+				case <- ctx.Done():
+					log.Print("canceled receiver")
 					return
 				}
 			}
@@ -108,10 +103,12 @@ func (session *RTPSession) start(ctx context.Context, dialoguepipe <-chan *event
 			defer close(pipe)
 			for {
 				select {
-				case v := <-queue.Get():
-					pipe <- v.(*event)
-				case <-ctx.Done():
-					log.Println("canceled putter")
+				case v := <- queue.Get():
+					if v != nil {
+						pipe <- v.(*event)
+					}
+				case <- ctx.Done():
+					log.Print("canceled putter")
 					return
 				}
 			}
@@ -124,17 +121,16 @@ func (session *RTPSession) start(ctx context.Context, dialoguepipe <-chan *event
 		echo := ctx.Value("echo")
 
 		go func() { // sender work
+			defer con.Close()
 			for {
 				select {
-				case v := <-pipe:
-					if echo == true || v.self != session {
+				case v := <- pipe:
+					if (v != nil) && (echo == true || v.self != session) {
 						data, _ := session.createSendingData(v)
 						con.WriteTo(data, session.remoteAddr)
-						log.Printf("write to %v", data, " addr", session.remoteAddr)
 					}
-				case <-ctx.Done():
-					log.Println("canceled writer")
-					con.Close()
+				case <- ctx.Done():
+					log.Print("canceled writer")
 					return
 				}
 			}
@@ -162,6 +158,8 @@ func (dialogue *Dialogue) start(ctx context.Context) {
 		recvPipes = append(recvPipes, rpipe)
 	}
 
+	mixed := fanIn(ctx, recvPipes...)
+
 	go func() { //dialogue goroutine
 		defer func() {
 			for _, spipe := range sendPipes {
@@ -171,11 +169,11 @@ func (dialogue *Dialogue) start(ctx context.Context) {
 
 		for {
 			select {
-			case v := <-fanIn(ctx, recvPipes...):
+			case v := <- mixed:
 				for _, sp := range sendPipes {
 					sp <- v
 				}
-			case <-ctx.Done():
+			case <- ctx.Done():
 				log.Println("dialogue routine cannceled")
 				return
 			}

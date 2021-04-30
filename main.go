@@ -9,10 +9,13 @@ import (
 	"os"
 	"os/signal"
 	"time"
+	"sync"
 )
 
-var localhost string = "localhost"
-var localbaseport int = 10000
+const (
+	localhost string = "localhost"
+	localbaseport int = 10000
+)
 
 func startEchoSession(ctx context.Context, local1, remote1 string) (*Dialogue, error) {
 
@@ -21,14 +24,12 @@ func startEchoSession(ctx context.Context, local1, remote1 string) (*Dialogue, e
 		return nil, errors.New("")
 	}
 
-	ctx = context.WithValue(ctx, "echo", true)
-
 	dialogue, err := createDialogue(session1)
 	if err != nil {
 		return nil, errors.New("")
 	}
 
-	dialogue.start(ctx)
+	dialogue.start(context.WithValue(ctx, "echo", true))
 
 	return dialogue, nil
 }
@@ -65,6 +66,7 @@ func createSession(local, remote string) (*RTPSession, error) {
 	if err != nil {
 		return nil, fmt.Errorf("remote addr invalid", remote)
 	}
+
 	session := new(RTPSession)
 	session.localAddr = laddr
 	session.remoteAddr = raddr
@@ -72,8 +74,6 @@ func createSession(local, remote string) (*RTPSession, error) {
 	session.streams = make(map[uint32]*RTPStream)
 	stream := new(RTPStream)
 	session.streams[0] = stream // まずはSSRC０のみ使う
-
-	log.Printf(".... %#v\n", session)
 
 	return session, nil
 }
@@ -98,17 +98,19 @@ func main() {
 	signal.Notify(sigc, os.Interrupt, os.Kill)
 
 	startBridge(ctx, string(localhost+":10000"), string(localhost+":20000"), string(localhost+":10002"), string(localhost+":20002"))
-
 	startEchoSession(ctx, string(localhost+":10004"), string(localhost+":20004"))
 
+	var once sync.Once
 	for {
+		once.Do(func() { log.Print("start") })
+
 		select {
-		case s := <-sigc:
+		case s := <- sigc:
 			log.Println("signal received", s)
 			cancel()
 			time.Sleep(1 * time.Second)
 			return
-		case <-time.After(1 * time.Second):
+		case <- time.After(10 * time.Second):
 			log.Println("timeout 1")
 		}
 	}

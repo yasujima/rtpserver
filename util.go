@@ -16,7 +16,7 @@ func fanIn(
 		defer wg.Done()
 		for i := range c {
 			select {
-			case <-ctx.Done():
+			case <- ctx.Done():
 				return
 			case multiplexedStream <- i:
 			}
