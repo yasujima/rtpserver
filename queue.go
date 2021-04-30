@@ -1,11 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
-	"context"
-	"log"
 )
 
 type Queue struct {
@@ -13,7 +13,7 @@ type Queue struct {
 	accept chan interface{}
 	notify chan interface{}
 	cond   sync.Cond
-	ctx context.Context
+	ctx    context.Context
 }
 
 func newQueue(ctx context.Context, recv chan interface{}) *Queue {
@@ -106,10 +106,6 @@ func _main() {
 	}()
 
 	go func() {
-		// for i := 0; i < 100; i++ {
-		// 	j := queue.get()
-		// 	fmt.Println("...get ", j)
-		// }
 		for {
 			select {
 			case v := <-queue.Out():
