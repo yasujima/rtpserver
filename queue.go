@@ -16,13 +16,14 @@ type Queue struct {
 	ctx context.Context
 }
 
-func newQueue(ctx context.Context) *Queue {
+func newQueue(ctx context.Context, recv chan interface{}) *Queue {
 
 	queue := new(Queue)
 	queue.que = make([]interface{}, 0)
 	queue.cond = *sync.NewCond(&sync.Mutex{})
 
-	queue.accept = make(chan interface{})
+	//	queue.accept = make(chan interface{})
+	queue.accept = recv
 	queue.notify = make(chan interface{})
 	queue.ctx = ctx
 	queue.run()
@@ -90,7 +91,7 @@ func (q *Queue) get() interface{} {
 
 func _main() {
 
-	queue := newQueue(context.Background())
+	queue := newQueue(context.Background(), make(chan interface{}))
 
 	var wg sync.WaitGroup
 	wg.Add(2)

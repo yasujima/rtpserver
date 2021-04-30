@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"time"
+	"sync"
 )
 
 type event struct {
@@ -34,8 +35,38 @@ type RTPSession struct {
 
 	remoteAddr *net.UDPAddr
 	localAddr  *net.UDPAddr
+}
 
-	pipe chan *event
+
+func fanIn(
+	ctx context.Context,
+	channels ...<-chan *event,
+) <-chan *event {
+	var wg sync.WaitGroup
+	multiplexedStream := make(chan *event)
+
+	multiplex := func(c <-chan *event) {
+		defer wg.Done()
+		for i := range c {
+			select {
+			case <- ctx.Done():
+				return
+			case multiplexedStream <- i:
+			}
+		}
+	}
+
+	wg.Add(len(channels))
+	for _, c := range channels {
+		go multiplex(c)
+	}
+
+	go func() {
+		wg.Wait()
+		close(multiplexedStream)
+	} ()
+
+	return multiplexedStream
 }
 
 func (session *RTPSession) getRecvQ() *Queue {
@@ -69,119 +100,134 @@ func (session *RTPSession) createSendingData(eve *event) ([]byte, error) {
 }
 
 type Dialogue struct {
-	pipe     chan *event
 	sessions []*RTPSession
 }
 
 var localhost string = "localhost"
 var localbaseport int = 10000
 
-func (session *RTPSession) put(eve *event) {
-	session.pipe <- eve
-}
-
-func (session *RTPSession) start(ctx context.Context, pipe chan<- *event) {
+func (session *RTPSession) start(ctx context.Context, dialoguepipe <-chan *event) chan *event {
 
 	con, _ := net.ListenUDP("udp", session.localAddr)
 
-	go func() { //receiver work
-
-		var buf [1500]byte
-		for {
-
-			con.SetDeadline(time.Now().Add(3 * time.Second))
-			n, remote, err := con.ReadFromUDP(buf[:])
-			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
-				continue
+	receiverWork := func(ctx context.Context) *Queue {
+		qchan := make(chan interface{})
+		queue := newQueue(ctx, qchan)
+		go func() { //receiver work
+			defer close(qchan)
+			var buf [1500]byte
+			for {
+				con.SetDeadline(time.Now().Add(3 * time.Second))
+				n, remote, err := con.ReadFromUDP(buf[:])
+				if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+					continue
+				}
+				log.Println("num..", n)
+				log.Println("remt.", remote)
+				log.Println("val..", string(buf[:]))
+				e := event{self: session}
+				e.buf = make([]byte, n)
+				copy(e.buf, buf[:])
+				e.source = remote
+				select {
+				case queue.In() <- &e:
+				case <-ctx.Done():
+					log.Println("canceled receiver")
+					return
+				}
 			}
-			log.Println("num..", n)
-			log.Println("remt.", remote)
-			log.Println("val..", string(buf[:]))
-			e := event{self: session}
-			e.buf = make([]byte, n)
-			copy(e.buf, buf[:])
-			e.source = remote
-			select {
-			case session.getRecvQ().In() <- &e:
-			case <-ctx.Done():
-				log.Println("canceled receiver")
-				return
-			}
-		}
-	}()
+		}()
+		return queue
+	}
 
-	go func() { // get and bridge work
-		for {
-			select {
-			case v := <-session.getRecvQ().Out():
-				pipe <- v.(*event)
-			case <-ctx.Done():
-				log.Println("canceled putter")
-				return
+	bridgeWork := func(ctx context.Context, queue *Queue) chan *event {
+		pipe := make(chan *event)
+		go func() { // get and bridge work
+			defer close(pipe)
+			for {
+				select {
+				case v := <-queue.Out():
+					pipe <- v.(*event)
+				case <-ctx.Done():
+					log.Println("canceled putter")
+					return
+				}
 			}
-		}
-	}()
+		}()
+		return pipe
+	}
 
-	go func() { // sender work
-		for {
-			select {
-			case v := <-session.pipe:
-				data, _ := session.createSendingData(v)
-				con.WriteTo(data, session.remoteAddr)
-				log.Printf("write to %v", data, " addr", session.remoteAddr)
-			case <-ctx.Done():
-				log.Println("canceled writer")
-				con.Close()
-				return
+	senderWork := func(ctx context.Context, pipe <-chan *event) {
+
+		echo := ctx.Value("echo")
+		
+		go func() { // sender work
+			for {
+				select {
+				case v := <-pipe:
+					if echo == true || v.self != session {
+						data, _ := session.createSendingData(v)
+						con.WriteTo(data, session.remoteAddr)
+						log.Printf("write to %v", data, " addr", session.remoteAddr)
+					}
+				case <-ctx.Done():
+					log.Println("canceled writer")
+					con.Close()
+					return
+				}
 			}
-		}
-	}()
+		}()
+	}
 
+	queue := receiverWork(ctx)
+	sessionpipe := bridgeWork(ctx, queue)
+	senderWork(ctx, dialoguepipe)
+
+	return sessionpipe
 }
 
 func startEchoSession(ctx context.Context, local1, remote1 string) (*Dialogue, error) {
 
-	session1, err := createSession(ctx, local1, remote1)
+	session1, err := createSession(local1, remote1)
 	if err != nil {
 		return nil, errors.New("")
 	}
 
 	ctx = context.WithValue(ctx, "echo", true)
 
-	dialogue, err := createDialogue(ctx, session1)
+	dialogue, err := createDialogue(session1)
 	if err != nil {
 		return nil, errors.New("")
 	}
 
-	session1.start(ctx, dialogue.pipe)
+	dialogue.start(ctx)
 
 	return dialogue, nil
 }
 
 func startBridge(ctx context.Context, local1, remote1, local2, remote2 string) (*Dialogue, error) {
 
-	session1, err := createSession(ctx, local1, remote1)
+	session1, err := createSession(local1, remote1)
 	if err != nil {
 		return nil, errors.New("")
 	}
 
-	session2, err := createSession(ctx, local2, remote2)
+	session2, err := createSession(local2, remote2)
 	if err != nil {
 		return nil, errors.New("")
 	}
 
-	dialogue, err := createDialogue(ctx, session1, session2)
+	dialogue, err := createDialogue(session1, session2)
 	if err != nil {
 		return nil, errors.New("")
 	}
 
-	session1.start(ctx, dialogue.pipe)
-	session2.start(ctx, dialogue.pipe)
+	dialogue.start(ctx)
 
 	return dialogue, nil
 }
 
-func createSession(ctx context.Context, local, remote string) (*RTPSession, error) {
+func createSession(local, remote string) (*RTPSession, error) {
 
 	laddr, err := net.ResolveUDPAddr("udp", local)
 	if err != nil {
@@ -194,50 +240,67 @@ func createSession(ctx context.Context, local, remote string) (*RTPSession, erro
 	session := new(RTPSession)
 	session.localAddr = laddr
 	session.remoteAddr = raddr
-	session.recvqueue = newQueue(ctx)
+
+	//	qchan := make(chan<- interface{})
+	//	session.recvqueue = newQueue(ctx, qchan)
 
 	session.streams = make(map[uint32]*RTPStream)
 	stream := new(RTPStream)
 	session.streams[0] = stream // まずはSSRC０のみ使う
 
-	session.pipe = make(chan *event)
+	//	session.pipe = make(chan *event)
 
 	log.Printf(".... %#v\n", session)
 
 	return session, nil
 }
 
-func createDialogue(ctx context.Context, sessions ...*RTPSession) (*Dialogue, error) {
+func createDialogue(sessions ...*RTPSession) (*Dialogue, error) {
 
 	dialogue := new(Dialogue)
 
-	for _, s := range sessions {
+ 	for _, s := range sessions {
 		dialogue.sessions = append(dialogue.sessions, s)
 	}
 
-	pipe := make(chan *event)
-	dialogue.pipe = pipe
 
-	echo := ctx.Value("echo")
+	return dialogue, nil
+}
 
-	go func(ctx context.Context) { //dialogue goroutine
+func (dialogue *Dialogue) start(ctx context.Context) {
+	
+	sendPipes := []chan *event{}
+	recvPipes := []<-chan *event{}
+ 	for _, s := range dialogue.sessions {
+		spipe := make(chan *event)
+		rpipe := s.start(ctx, spipe)
+		sendPipes = append(sendPipes, spipe)
+		recvPipes = append(recvPipes, rpipe)
+	}
+
+	
+
+	go func() { //dialogue goroutine
+		defer func () {
+			for _, c := range sendPipes {
+				close(c)
+			}
+		}()
+		
 		for {
 			select {
-			case v := <-pipe:
-				for _, s := range dialogue.sessions {
-					if echo == true || v.self != s {
-						s.put(v)
-					}
+			case v := <-fanIn(ctx, recvPipes...):
+				for _, sp := range sendPipes {
+					sp<- v
 				}
 			case <-ctx.Done():
 				log.Println("dialogue routine cannceled")
 				return
 			}
 		}
-	}(ctx)
-
-	return dialogue, nil
+	}()
 }
+
 
 func main() {
 
