@@ -13,60 +13,66 @@ import (
 
 type AddressObj struct {
 	Address string
-	Port int
+	Port    int
 }
 
 type StreamObj struct {
-	Realm string
+	Realm      string
 	RemoteAddr AddressObj
-	Pt int
+	Pt         int
 }
-	
+
 type SessionObj struct {
 	Streams map[int]*StreamObj
 }
 
-type ReqObj struct {
-	Ch chan <- interface{}
-	AnyReq interface{}
+type APIObj interface {
 }
 
 type POSTReq struct {
-	Id int
-	Target string
+	APIObj
+	Id       string
+	Target   string
 	Sessions map[int]*SessionObj
 }
 
 type POSTResp struct {
-	Id int
-	Result bool
+	APIObj
+	Id       string
+	Result   bool
 	Sessions map[int]*SessionObj
 }
 
 type PUTReq struct {
-	Id int
+	APIObj
+	Id       string
 	Sessions map[int]*SessionObj
 }
 
 type PUTResp struct {
-	Id int
+	APIObj
+	Id       string
 	Sessions map[int]*SessionObj
 }
 
 type GETReq struct {
-	Id int
+	APIObj
+	Id string
 }
 
 type GETResp struct {
-	Id int
+	APIObj
+	Id string
 }
 
 type DELETEReq struct {
-	Id int
+	APIObj
+	Id string
 }
 
 type DELETEResp struct {
-	id int
+	APIObj
+	id string
 }
 
 type event struct {
@@ -146,7 +152,7 @@ func (session *RTPSession) start(ctx context.Context, dialoguepipe <-chan *event
 				e.source = remote
 				select {
 				case queue.Put() <- &e:
-				case <- ctx.Done():
+				case <-ctx.Done():
 					log.Print("canceled receiver")
 					return
 				}
@@ -161,11 +167,11 @@ func (session *RTPSession) start(ctx context.Context, dialoguepipe <-chan *event
 			defer close(pipe)
 			for {
 				select {
-				case v := <- queue.Get():
+				case v := <-queue.Get():
 					if v != nil {
 						pipe <- v.(*event)
 					}
-				case <- ctx.Done():
+				case <-ctx.Done():
 					log.Print("canceled putter")
 					return
 				}
@@ -182,12 +188,12 @@ func (session *RTPSession) start(ctx context.Context, dialoguepipe <-chan *event
 			defer con.Close()
 			for {
 				select {
-				case v := <- pipe:
+				case v := <-pipe:
 					if (v != nil) && (echo == true || v.self != session) {
 						data, _ := session.createSendingData(v)
 						con.WriteTo(data, session.remoteAddr)
 					}
-				case <- ctx.Done():
+				case <-ctx.Done():
 					log.Print("canceled writer")
 					return
 				}
@@ -227,11 +233,11 @@ func (dialogue *Dialogue) start(ctx context.Context) {
 
 		for {
 			select {
-			case v := <- mixed:
+			case v := <-mixed:
 				for _, sp := range sendPipes {
 					sp <- v
 				}
-			case <- ctx.Done():
+			case <-ctx.Done():
 				log.Println("dialogue routine cannceled")
 				return
 			}

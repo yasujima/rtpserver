@@ -4,28 +4,42 @@ import (
 	"context"
 	"github.com/labstack/echo"
 	"net/http"
+	//	"strconv"
 )
 
-func APIStart(ctx context.Context) <-chan interface{} {
-
-	reqchan := make(chan interface{})	
+func APIStart(ctx context.Context, callback func(obj APIObj) <-chan interface{}) {
 
 	e := echo.New()
-	e.GET("/ping", func(c echo.Context) error {
-		ch := make(chan interface{})
-		defer close(ch)
-
-		req := GETReq{Id:0}
-		obj := ReqObj{Ch:ch, AnyReq:req}
-		
-		reqchan <- obj
+	e.GET("/api/:id", func(c echo.Context) error {
+		str := c.Param("id")
+		req := GETReq{Id: str}
+		ch := callback(req)
 		res := <-ch
 		return c.String(http.StatusOK, res.(string))
 	})
-	
+	e.POST("/api/:id", func(c echo.Context) error {
+		str := c.Param("id")
+		req := POSTReq{Id: str}
+		ch := callback(req)
+		res := <-ch
+		return c.String(http.StatusOK, res.(string))
+	})
+	e.PUT("/api/:id", func(c echo.Context) error {
+		str := c.Param("id")
+		req := PUTReq{Id: str}
+		ch := callback(req)
+		res := <-ch
+		return c.String(http.StatusOK, res.(string))
+	})
+	e.DELETE("/api/:id", func(c echo.Context) error {
+		str := c.Param("id")
+		req := DELETEReq{Id: str}
+		ch := callback(req)
+		res := <-ch
+		return c.String(http.StatusOK, res.(string))
+	})
+
 	go func() {
-		defer close(reqchan)
 		e.Start(":8080")
 	}()
-	return reqchan
 }

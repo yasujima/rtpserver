@@ -8,13 +8,13 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"time"
 	"sync"
+	"time"
 )
 
 const (
-	localhost string = "localhost"
-	localbaseport int = 10000
+	localhost     string = "localhost"
+	localbaseport int    = 10000
 )
 
 func startEchoSession(ctx context.Context, local1, remote1 string) (*Dialogue, error) {
@@ -89,11 +89,43 @@ func createDialogue(sessions ...*RTPSession) (*Dialogue, error) {
 	return dialogue, nil
 }
 
-func commandHandler(c chan<- interface{}, obj interface{}) {
+func getHandler(obj GETReq) string {
+	return string("get handler result")
+}
 
+func postHandler(obj POSTReq) string {
+	return fmt.Sprintf("post handler:%d", obj.Id)
+}
+
+func putHandler(obj PUTReq) string {
+	return fmt.Sprintf("put handler:%d", obj.Id)
+}
+func deleteHandler(obj DELETEReq) string {
+	return fmt.Sprintf("delete handler:%d", obj.Id)
+}
+
+func commandHandler(obj APIObj) <-chan interface{} {
+
+	log.Printf("command handler %#v", obj)
+
+	ch := make(chan interface{})
 	go func() {
-		c <- string("hello world")
+		defer close(ch)
+
+		switch obj := obj.(type) {
+		case GETReq:
+			ch <- getHandler(obj)
+		case POSTReq:
+			ch <- postHandler(obj)
+		case PUTReq:
+			ch <- putHandler(obj)
+		case DELETEReq:
+			ch <- deleteHandler(obj)
+		default:
+			ch <- string("unsuppot obj")
+		}
 	}()
+	return ch
 }
 
 func main() {
@@ -107,27 +139,19 @@ func main() {
 	startBridge(ctx, string(localhost+":10000"), string(localhost+":20000"), string(localhost+":10002"), string(localhost+":20002"))
 	startEchoSession(ctx, string(localhost+":10004"), string(localhost+":20004"))
 
-	apireq := APIStart(ctx)
+	APIStart(ctx, commandHandler)
 
 	var once sync.Once
 	for {
 		once.Do(func() { log.Print("start") })
 
 		select {
-		case obj, ok := <- apireq:
-			log.Print("api req received")
-			if !ok {
-				log.Print("err received")
-			} else {
-				commandHandler(obj.(ReqObj).Ch,
-					obj.(ReqObj).AnyReq)
-			}
-		case s := <- sigc:
+		case s := <-sigc:
 			log.Println("signal received", s)
 			cancel()
 			time.Sleep(1 * time.Second)
 			return
-		case <- time.After(10 * time.Second):
+		case <-time.After(10 * time.Second):
 			log.Println("timeout 1")
 		}
 	}
