@@ -1,0 +1,27 @@
+cmd:
+  - create POST
+  - modify PUT
+  - delete DELETE
+
+target:
+  - bridge
+  - conference
+  - echo
+
+
+  POST/<id>
+  JSON DATA {target=>bridge, sessions=>{xxxxx}}
+
+  PUT/<id>
+  JSON DATA {realms=>[xxxxx]}
+
+  target=>bridge sessions => {0=> {streams=>{0=>{realm => realm1, remoto => {address=>192.168.0.1, port=8000}, pt=>0}}. 1=>{streams=>{0=>{realm=>realm2....}}}, id=xxxxxxxxxxx
+
+  =>
+
+  result=true, sessions {....}//中身を埋める session内にもindexを付与
+
+  cmd=>modify id realms []//各配列で変更追加したいパラメータのみ記載、記載ない項目は変更なし
+  result=true
+  // null を指定することで削除
+

@@ -11,6 +11,64 @@ import (
 	"time"
 )
 
+type AddressObj struct {
+	Address string
+	Port int
+}
+
+type StreamObj struct {
+	Realm string
+	RemoteAddr AddressObj
+	Pt int
+}
+	
+type SessionObj struct {
+	Streams map[int]*StreamObj
+}
+
+type ReqObj struct {
+	Ch chan <- interface{}
+	AnyReq interface{}
+}
+
+type POSTReq struct {
+	Id int
+	Target string
+	Sessions map[int]*SessionObj
+}
+
+type POSTResp struct {
+	Id int
+	Result bool
+	Sessions map[int]*SessionObj
+}
+
+type PUTReq struct {
+	Id int
+	Sessions map[int]*SessionObj
+}
+
+type PUTResp struct {
+	Id int
+	Sessions map[int]*SessionObj
+}
+
+type GETReq struct {
+	Id int
+}
+
+type GETResp struct {
+	Id int
+}
+
+type DELETEReq struct {
+	Id int
+}
+
+type DELETEResp struct {
+	id int
+}
+
 type event struct {
 	buf    []byte
 	val    string

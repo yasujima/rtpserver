@@ -89,6 +89,13 @@ func createDialogue(sessions ...*RTPSession) (*Dialogue, error) {
 	return dialogue, nil
 }
 
+func commandHandler(c chan<- interface{}, obj interface{}) {
+
+	go func() {
+		c <- string("hello world")
+	}()
+}
+
 func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -100,11 +107,21 @@ func main() {
 	startBridge(ctx, string(localhost+":10000"), string(localhost+":20000"), string(localhost+":10002"), string(localhost+":20002"))
 	startEchoSession(ctx, string(localhost+":10004"), string(localhost+":20004"))
 
+	apireq := APIStart(ctx)
+
 	var once sync.Once
 	for {
 		once.Do(func() { log.Print("start") })
 
 		select {
+		case obj, ok := <- apireq:
+			log.Print("api req received")
+			if !ok {
+				log.Print("err received")
+			} else {
+				commandHandler(obj.(ReqObj).Ch,
+					obj.(ReqObj).AnyReq)
+			}
 		case s := <- sigc:
 			log.Println("signal received", s)
 			cancel()
